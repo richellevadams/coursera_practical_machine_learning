@@ -1,0 +1,83 @@
+---
+title: "Activity Quality"
+author: "Richelle V. Adams"
+date: "Saturday, September 26, 2015"
+output: html_document
+---
+In this project, data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants would be used to predict how well they performed barbell lifts. The outcome consists of five (5) different ways barbell lifts are performed correctly and incorrectly labelled as A, B, C, D, E.
+
+The Weight Lifting Exercise dataset used for this project comes from  http://groupware.les.inf.puc-rio.br/har. The file containing the data was pml-training.csv. 
+
+```{r, echo=FALSE, results='hide'}
+library(caret)
+library(dplyr)
+
+df<-read.csv("pml-training.csv")
+```
+
+There were `r nrow(df)` samples and `r ncol(df)` variables, one of which was the outcome called "classe".  It was the `r ncol(df)`th variable.  So there were `r ncol(df)-1` potential features.  However, upon examining the data set, as seen below, there were a number of factor variables that had to be converted to numeric.
+
+```{r, echo=FALSE, warning=FALSE}
+str(df, list.len=10)
+indx<-sapply(df[,-160],is.factor)
+df[indx]<-lapply(df[indx], function(x) as.numeric(as.character(x)))
+```
+
+The dataset was broken up randomly into a training set (75%) and test set (25%) for the purpose of cross-validation.
+
+```{r}
+inTrain<-createDataPartition(y=df$classe, p=0.75, list=FALSE)
+training<-df[inTrain,]
+testing<-df[-inTrain,]
+```
+
+After doing the factor-to-numeric conversion and breaking up the dataset, it was found that a number of the variables were predominantly "NA" in value. So much so that they caused every record in the training (and test) dataset to be incomplete.  Therefore, the task was to identify these variables. They were found to be as follows:
+
+```{r, echo=FALSE}
+dfl<-data.frame(a=numeric(160))
+for (i in 1:160) { dfl$a[i]<-sum(length(which(is.na(training[,i]))))}
+indx1<-dfl$a==0
+anames<-colnames(training[, indx1])
+anames
+```
+
+Additionally, the variables:raw_timestamp_part_1, raw_timestamp_part_2 and X  were thought to be unnecessary for the prediction and were then also removed.
+
+```{r}
+training2<-select(training, one_of(anames))
+training2<-select(training2, -raw_timestamp_part_1, -raw_timestamp_part_2, -X)
+
+testing2<-select(testing, one_of(anames))
+testing2<-select(testing2, -raw_timestamp_part_1, -raw_timestamp_part_2, -X)
+```
+
+Therefore, the number of features used in the prediction was `r ncol(training2)-1`.
+
+For some exploratory data analysis a pair-wise scatter plot of the outcome "classe" and the variables "total_accel_dumbbell", "total_accel_arm", "total_accel_belt", and "total_accel_forearm". It can is shown as follows
+
+```{r, warning=FALSE}
+featurePlot(x=training2[,c("total_accel_dumbbell", "total_accel_arm", "total_accel_belt", "total_accel_forearm")], y=training2$classe, plot="pairs")
+```
+It can be seen that the data set splits into two separate "portions" seemingly for all outcomes when the other three variables are plotted against "total_accel_belt" variable.
+
+It was decided to determine if there were significant correlations (i.e., greater than 0.8) among the features (excluding the "classe" variable).  
+
+```{r, echo=FALSE}
+M<-abs(cor(training2[,-54]))
+diag(M)<-0
+which(M>0.8, arr.ind=T)
+```
+
+A significant number of pairs of variables have correlations greater than 0.8.  Hence Principal Component Analysis (PCA) may be beneficial in improving the prediction model. Therefore we created the default prediction model - random forest - based on the training set with pca preprocessing.
+
+```{r, cache=TRUE, warning=FALSE}
+modelFit2<-train(classe ~., data=training2, preProcess="pca")
+modelFit2
+```
+
+The model was then applied to the test set
+```{r, warning=FALSE}
+confusionMatrix(testing2$classe, predict(modelFit2,testing2))
+```
+
+Based on the model, it was found that the accuracy on the cross-validation testing set was 97.9% (See confusion matrix and statistics summary above).  However, when the model was run on the testing data found in "pml-testing.csv", 19 of the 20 symbols were predicted correctly - a 95% accuracy.
